@@ -37,11 +37,12 @@ Version:    2013-01-22
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+import os
 from argparse import ArgumentParser, FileType
 from os.path import abspath, dirname, isfile, join as path_join
 from shutil import rmtree
 from struct import calcsize, pack, unpack
-from subprocess import Popen
+from subprocess import Popen, PIPE
 from sys import stderr, stdin, stdout
 from tempfile import mkdtemp
 
@@ -94,50 +95,52 @@ def bh_tsne(samples, no_dims=DEFAULT_NO_DIMS, perplexity=DEFAULT_PERPLEXITY, the
     sample_dim = len(samples[0])
     sample_count = len(samples)
 
-    # bh_tsne works with fixed input and output paths, give it a temporary
-    #   directory to work in so we don't clutter the filesystem
-    with TmpDir() as tmp_dir_path:
-        # Note: The binary format used by bh_tsne is roughly the same as for
-        #   vanilla tsne
-        with open(path_join(tmp_dir_path, 'data.dat'), 'wb') as data_file:
-            # Write the bh_tsne header
-            data_file.write(pack('iiddi', sample_count, sample_dim, theta, perplexity, no_dims))
-            # Then write the data
-            for sample in samples:
-                data_file.write(pack('{}d'.format(len(sample)), *sample))
-            # Write random seed if specified
-            if randseed != EMPTY_SEED:
-                data_file.write(pack('i', randseed))
+    # create data sink
+    with open(os.devnull, 'w') as dev_null:
 
-        # Call bh_tsne and let it do its thing
-        with open('/dev/null', 'w') as dev_null:
-            bh_tsne_p = Popen((abspath(BH_TSNE_BIN_PATH), ), cwd=tmp_dir_path,
-                    # bh_tsne is very noisy on stdout, tell it to use stderr
-                    #   if it is to print any output
-                    stdout=stderr if verbose else dev_null)
-            bh_tsne_p.wait()
-            assert not bh_tsne_p.returncode, ('ERROR: Call to bh_tsne exited '
-                    'with a non-zero return code exit status, please ' +
-                    ('enable verbose mode and ' if not verbose else '') +
-                    'refer to the bh_tsne output for further details')
+        # start the tSNE process
+        bh_tsne_p = Popen((abspath(BH_TSNE_BIN_PATH), ),
+                          stdin=PIPE, stdout=PIPE,
+                          # bh_tsne is very noisy, tell it to use
+                          # stderr if it is to print any output
+                          stderr=stderr if verbose else dev_null)
+    
+        data_file = bh_tsne_p.stdin    
+
+        # Write the bh_tsne header
+        data_file.write(pack('iiddi', sample_count, sample_dim, theta, perplexity, no_dims))
+        # Then write the data
+        for sample in samples:
+            data_file.write(pack('{}d'.format(len(sample)), *sample))
+        # Write random seed if specified
+        if randseed != EMPTY_SEED:
+            data_file.write(pack('i', randseed))
+        data_file.close()
 
         # Read and pass on the results
-        with open(path_join(tmp_dir_path, 'result.dat'), 'rb') as output_file:
-            # The first two integers are just the number of samples and the
-            #   dimensionality
-            result_samples, result_dims = _read_unpack('ii', output_file)
-            # Collect the results, but they may be out of order
-            results = [_read_unpack('{}d'.format(result_dims), output_file)
-                for _ in xrange(result_samples)]
-            # Now collect the landmark data so that we can return the data in
-            #   the order it arrived
-            results = [(_read_unpack('i', output_file), e) for e in results]
-            # Put the results in order and yield it
-            results.sort()
-            for _, result in results:
-                yield result
-            # The last piece of data is the cost for each sample, we ignore it
-            #read_unpack('{}d'.format(sample_count), output_file)
+        output_file = bh_tsne_p.stdout
+        # The first two integers are just the number of samples and the
+        #   dimensionality
+        result_samples, result_dims = _read_unpack('ii', output_file)
+        # Collect the results, but they may be out of order
+        results = [_read_unpack('{}d'.format(result_dims), output_file)
+            for _ in xrange(result_samples)]
+        # Now collect the landmark data so that we can return the data in
+        #   the order it arrived
+        results = [(_read_unpack('i', output_file), e) for e in results]
+        # Put the results in order and yield it
+        results.sort()
+        for _, result in results:
+            yield result
+        # The last piece of data is the cost for each sample, we ignore it
+        #read_unpack('{}d'.format(sample_count), output_file)
+
+        # wait for the background tSNE process to finish, check result
+        bh_tsne_p.wait()
+        assert not bh_tsne_p.returncode, ('ERROR: Call to bh_tsne exited '
+                'with a non-zero return code exit status, please ' +
+                ('enable verbose mode and ' if not verbose else '') +
+                'refer to the bh_tsne output for further details')
 
 def main(args):
     argp = _argparse().parse_args(args[1:])
