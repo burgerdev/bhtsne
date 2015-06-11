@@ -76,17 +76,9 @@ def _argparse():
     return argparse
 
 
-class TmpDir:
-    def __enter__(self):
-        self._tmp_dir_path = mkdtemp()
-        return self._tmp_dir_path
-
-    def __exit__(self, type, value, traceback):
-        rmtree(self._tmp_dir_path)
-
-
 def _read_unpack(fmt, fh):
     return unpack(fmt, fh.read(calcsize(fmt)))
+
 
 def bh_tsne(samples, no_dims=DEFAULT_NO_DIMS, perplexity=DEFAULT_PERPLEXITY, theta=DEFAULT_THETA, randseed=EMPTY_SEED,
         verbose=False):

@@ -692,7 +692,6 @@ void TSNE::save_data(double* data, int* landmarks, double* costs, int n, int d) 
     fwrite(data, sizeof(double), n * d, h);
 	fwrite(landmarks, sizeof(int), n, h);
     fwrite(costs, sizeof(double), n, h);
-    fclose(h);
 	fprintf(stderr, "Wrote the %i x %i data matrix successfully!\n", n, d);
 }
 
